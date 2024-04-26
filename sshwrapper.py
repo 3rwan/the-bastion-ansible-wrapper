@@ -11,6 +11,7 @@ from lib import (
     get_hostvars,
     get_var_within,
     manage_conf_file,
+    parse_ansible_command,
 )
 
 
@@ -20,12 +21,12 @@ def main():
     bastion_user = None
     bastion_host = None
     bastion_port = None
+    bastion_ansible_remote_user = None
     remote_user = None
     remote_port = 22
     default_configuration_file = "/etc/ovh/bastion/config.yml"
 
-    cmd = argv.pop()
-    host = argv.pop()
+    options, cmd, host = parse_ansible_command(argv)
 
     # check if bastion_vars are passed as env vars in the playbook
     # may be usefull if the ansible controller manage many bastions
@@ -38,28 +39,35 @@ def main():
     #     BASTION_PORT: "{{ bastion_port }}"
     #
     # will result as : ... '/bin/sh -c '"'"'BASTION_USER=my_bastion_user BASTION_HOST=my_bastion_host BASTION_PORT=22 /usr/bin/python3 && sleep 0'"'"''
-    for i in list(cmd.split(" ")):
+    for i in list(cmd):
         if "bastion_user" in i.lower():
             bastion_user = i.split("=")[1]
         elif "bastion_host" in i.lower():
             bastion_host = i.split("=")[1]
         elif "bastion_port" in i.lower():
             bastion_port = i.split("=")[1]
+        elif "bastion_ansible_remote_user" in i.lower():
+            bastion_ansible_remote_user = i.split("=")[1]
 
     # in some cases (AWX in a non containerised environment for instance), the environment is overridden by the job
     # so we are not able to get the BASTION vars
     # if some vars are still undefined, try to load them from a configuration file
-    bastion_host, bastion_port, bastion_user = manage_conf_file(
+    (
+        bastion_host,
+        bastion_port,
+        bastion_user,
+        bastion_ansible_remote_user,
+    ) = manage_conf_file(
         os.environ.get("BASTION_CONF_FILE", default_configuration_file),
         bastion_host,
         bastion_port,
         bastion_user,
+        bastion_ansible_remote_user,
     )
 
     # lookup on the inventory may take some time, depending on the source, so use it only if not defined elsewhere
     # it seems like some module like template does not send env vars too...
     if not bastion_host or not bastion_port or not bastion_user:
-
         # check if running on AWX, we'll get the vars in a different way
         awx_inventory_file = awx_get_inventory_file()
         if os.path.exists(awx_inventory_file):
@@ -81,15 +89,24 @@ def main():
         bastion_host = get_var_within(
             hostvar.get("bastion_host", os.environ.get("BASTION_HOST")), hostvar
         )
+        bastion_ansible_remote_user = get_var_within(
+            hostvar.get(
+                "bastion_ansible_remote_user",
+                os.environ.get("BASTION_ANSIBLE_REMOTE_USER"),
+            ),
+            hostvar,
+        )
 
-    for i, e in enumerate(argv):
-
+    for i, e in enumerate(options):
         if e.startswith("User="):
             remote_user = e.split("=")[-1]
             argv[i] = "User={}".format(bastion_user)
         elif e.startswith("Port="):
             remote_port = e.split("=")[-1]
             argv[i] = "Port={}".format(bastion_port)
+
+    if not remote_user:
+        remote_user = bastion_ansible_remote_user
 
     # syscall exec
     args = (
@@ -105,7 +122,7 @@ def main():
             bastion_host,
             "-T",
         ]
-        + argv
+        + options
         + [
             "--",
             "-q",

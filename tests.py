@@ -7,52 +7,85 @@ from lib import (
     get_bastion_vars,
     get_var_within,
     manage_conf_file,
+    parse_ansible_command,
 )
 
 BASTION_HOST = "my_bastion"
 BASTION_PORT = 22
 BASTION_USER = "my_bastion_user"
+BASTION_ANSIBLE_REMOTE_USER = "my_ansible_remote_user"
 BASTION_CONF_FILE = "/tmp/test_bastion_conf_file.yml"
 
 
 def test_manage_conf_file_bastion_host_undefined():
-    bastion_host, bastion_port, bastion_user = manage_conf_file(
-        BASTION_CONF_FILE, None, BASTION_PORT, BASTION_USER
+    (
+        bastion_host,
+        bastion_port,
+        bastion_user,
+        bastion_ansible_remote_user,
+    ) = manage_conf_file(
+        BASTION_CONF_FILE,
+        None,
+        BASTION_PORT,
+        BASTION_USER,
+        BASTION_ANSIBLE_REMOTE_USER,
     )
     assert bastion_host == BASTION_HOST
 
 
 def test_manage_conf_file_bastion_port_undefined():
-    bastion_host, bastion_port, bastion_user = manage_conf_file(
-        BASTION_CONF_FILE, BASTION_HOST, None, BASTION_USER
+    (
+        bastion_host,
+        bastion_port,
+        bastion_user,
+        bastion_ansible_remote_user,
+    ) = manage_conf_file(
+        BASTION_CONF_FILE,
+        BASTION_HOST,
+        None,
+        BASTION_USER,
+        BASTION_ANSIBLE_REMOTE_USER,
     )
     assert bastion_port == BASTION_PORT
 
 
 def test_manage_conf_file_bastion_user_undefined():
-    bastion_host, bastion_port, bastion_user = manage_conf_file(
-        BASTION_CONF_FILE, BASTION_HOST, BASTION_PORT, None
+    (
+        bastion_host,
+        bastion_port,
+        bastion_user,
+        bastion_ansible_remote_user,
+    ) = manage_conf_file(
+        BASTION_CONF_FILE,
+        BASTION_HOST,
+        BASTION_PORT,
+        None,
+        BASTION_ANSIBLE_REMOTE_USER,
     )
     assert bastion_user == BASTION_USER
 
 
 def test_manage_conf_file_bastion_all_undefined():
     write_conf_file(BASTION_CONF_FILE)
-    bastion_host, bastion_port, bastion_user = manage_conf_file(
-        BASTION_CONF_FILE, None, None, None
-    )
+    (
+        bastion_host,
+        bastion_port,
+        bastion_user,
+        bastion_ansible_remote_user,
+    ) = manage_conf_file(BASTION_CONF_FILE, None, None, None, None)
     assert bastion_user == BASTION_USER
     assert bastion_port == BASTION_PORT
     assert bastion_host == BASTION_HOST
+    assert bastion_ansible_remote_user == BASTION_ANSIBLE_REMOTE_USER
 
 
 def write_conf_file(conf_file):
     with open(conf_file, "w") as f:
-
         data = {
             "bastion_host": BASTION_HOST,
             "bastion_port": BASTION_PORT,
             "bastion_user": BASTION_USER,
+            "bastion_ansible_remote_user": BASTION_ANSIBLE_REMOTE_USER,
         }
 
         dump(data, f)
@@ -133,3 +166,122 @@ def test_get_bastion_vars_not_full():
     host_vars = {"bastion_port": BASTION_PORT, "bastion_user": BASTION_USER}
     bastion_vars = get_bastion_vars(host_vars)
     assert not bastion_vars["bastion_host"]
+
+
+def test_parse_ansible_command():
+    cases = [
+        # Ansible
+        (
+            [
+                "-C",
+                "-o",
+                "ControlMaster=auto",
+                "-o",
+                "ControlPersist=60s",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "KbdInteractiveAuthentication=no",
+                "-o",
+                "PreferredAuthentications=gssapi-with-mic,gssapi-keyex,hostbased,publickey",
+                "-o",
+                "PasswordAuthentication=no",
+                "-o",
+                'User="root"',
+                "-o",
+                "ConnectTimeout=10",
+                "-o",
+                'ControlPath="/some/control/path"',
+                "my-secured-host",
+                "/bin/sh -c '/usr/bin/python3 && sleep 0'",
+            ],
+            [
+                "-C",
+                "-o",
+                "ControlMaster=auto",
+                "-o",
+                "ControlPersist=60s",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "KbdInteractiveAuthentication=no",
+                "-o",
+                "PreferredAuthentications=gssapi-with-mic,gssapi-keyex,hostbased,publickey",
+                "-o",
+                "PasswordAuthentication=no",
+                "-o",
+                'User="root"',
+                "-o",
+                "ConnectTimeout=10",
+                "-o",
+                'ControlPath="/some/control/path"',
+            ],
+            "/bin/sh -c '/usr/bin/python3 && sleep 0'",
+            "my-secured-host",
+        ),
+        # Mitogen
+        (
+            [
+                "-o",
+                "LogLevel ERROR",
+                "-l",
+                "root",
+                "-o",
+                "Compression yes",
+                "-o",
+                "ServerAliveInterval 30",
+                "-o",
+                "ServerAliveCountMax 10",
+                "-o",
+                "BatchMode yes",
+                "-o",
+                "StrictHostKeyChecking no",
+                "-o",
+                "UserKnownHostsFile /dev/null",
+                "-o",
+                "GlobalKnownHostsFile /dev/null",
+                "-C",
+                "-o",
+                "ControlMaster=auto",
+                "-o",
+                "ControlPersist=60s",
+                "my-secured-host",
+                "/usr/bin/python3",
+                "-c",
+                "'import sys;sys.path=[p for p in sys.path if p];import binascii,os,zlib;exec(zlib.decompress(binascii.a2b_base64(foobar)))'",
+            ],
+            [
+                "-o",
+                "LogLevel ERROR",
+                "-l",
+                "root",
+                "-o",
+                "Compression yes",
+                "-o",
+                "ServerAliveInterval 30",
+                "-o",
+                "ServerAliveCountMax 10",
+                "-o",
+                "BatchMode yes",
+                "-o",
+                "StrictHostKeyChecking no",
+                "-o",
+                "UserKnownHostsFile /dev/null",
+                "-o",
+                "GlobalKnownHostsFile /dev/null",
+                "-C",
+                "-o",
+                "ControlMaster=auto",
+                "-o",
+                "ControlPersist=60s",
+            ],
+            "/bin/sh -c '/usr/bin/python3 -c '\"'\"'import sys;sys.path=[p for p in sys.path if p];import binascii,os,zlib;exec(zlib.decompress(binascii.a2b_base64(foobar)))'\"'\"''",
+            "my-secured-host",
+        ),
+    ]
+
+    for args, expected_options, expected_cmd, expected_host in cases:
+        options, cmd, host = parse_ansible_command(args)
+        assert options == expected_options
+        assert cmd == expected_cmd
+        assert host == expected_host

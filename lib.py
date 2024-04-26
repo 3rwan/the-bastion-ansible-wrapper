@@ -3,6 +3,7 @@ import logging
 import os
 import subprocess
 import time
+from shlex import quote
 
 from yaml import YAMLError, safe_load
 
@@ -119,7 +120,9 @@ def get_hostvars(host) -> dict:
     return {}
 
 
-def manage_conf_file(conf_file, bastion_host, bastion_port, bastion_user):
+def manage_conf_file(
+    conf_file, bastion_host, bastion_port, bastion_user, bastion_ansible_remote_user
+):
     """Fetch the bastion vars from a config file.
 
     There will be set if not already defined, and before looking in the ansible inventory
@@ -137,11 +140,15 @@ def manage_conf_file(conf_file, bastion_host, bastion_port, bastion_user):
                     bastion_port = yaml_conf.get("bastion_port")
                 if not bastion_user:
                     bastion_user = yaml_conf.get("bastion_user")
+                if not bastion_ansible_remote_user:
+                    bastion_ansible_remote_user = yaml_conf.get(
+                        "bastion_ansible_remote_user"
+                    )
 
         except (YAMLError, IOError) as e:
             print("Error loading yaml file: {}".format(e))
 
-    return bastion_host, bastion_port, bastion_user
+    return bastion_host, bastion_port, bastion_user, bastion_ansible_remote_user
 
 
 def get_var_within(my_value, hostvar, check_list=None):
@@ -250,3 +257,43 @@ def get_bastion_vars(host_vars):
         "bastion_port": bastion_port,
         "bastion_user": bastion_user,
     }
+
+
+def parse_ansible_command(args):
+    options = []
+    cmd = ""
+    host = ""
+    i = 0
+    cmd_is_next = False
+    while i < len(args):
+        # -o options: Can be used to give options in the format used in the configuration file, followed by 1 argument
+        # -l login name, followed by 1 argument
+        if args[i] in ["-o", "-l"]:
+            options.append(args[i])
+            options.append(args[i + 1])
+            i = i + 2
+        # Collect everything option as standalone
+        # Example:
+        # -C Requests compression of all data, not followed by an argument
+        elif args[i].startswith("-"):
+            options.append(args[i])
+            i = i + 1
+        elif not host:
+            host = args[i]
+            i = i + 1
+            cmd_is_next = True
+        elif cmd_is_next:
+            # The cmd is the last elem but in two forms
+            # vanilla ansible passes the cmd as a single string
+            # mitogen passes the command as an array
+            # let's normalize
+            cmd = args[i:]
+            if isinstance(cmd, list):
+                cmd = " ".join(cmd)
+            break
+
+    # the wrapper expects a shell
+    if not cmd.startswith("/bin/sh"):
+        # note that we efficiently quote the cmd
+        cmd = " ".join(["/bin/sh", "-c", quote(cmd)])
+    return options, cmd, host
