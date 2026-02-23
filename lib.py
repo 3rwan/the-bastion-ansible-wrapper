@@ -7,37 +7,6 @@ import time
 
 from yaml import YAMLError, safe_load
 
-# Known SSH/Bastion error patterns and their user-friendly diagnostics.
-# Each entry maps a substring found in stderr to a contextual error message.
-BASTION_ERROR_PATTERNS = {
-    "Permission denied": (
-        "[BASTION ERROR] SSH connection to the Bastion was denied.\n"
-        "Verify that your SSH key is authorized on the Bastion, "
-        "and that bastion_user and bastion_host are correct.\n"
-    ),
-    "Connection refused": (
-        "[BASTION ERROR] Connection to the Bastion was refused.\n"
-        "Verify that the Bastion host and port are correct "
-        "and that the Bastion is accepting connections.\n"
-    ),
-    "Could not resolve hostname": (
-        "[BASTION ERROR] Could not resolve the Bastion hostname.\n"
-        "Verify that bastion_host is set to a valid, resolvable hostname.\n"
-    ),
-    "Connection timed out": (
-        "[BASTION ERROR] Connection to the Bastion timed out.\n"
-        "Verify network connectivity to the Bastion host and port.\n"
-    ),
-    "Operation timed out": (
-        "[BASTION ERROR] Connection to the Bastion timed out.\n"
-        "Verify network connectivity to the Bastion host and port.\n"
-    ),
-    "No route to host": (
-        "[BASTION ERROR] No route to the Bastion host.\n"
-        "Verify network connectivity and that bastion_host is correct.\n"
-    ),
-}
-
 
 def find_executable(executable, path=None):
     """Find the absolute path of an executable
@@ -285,12 +254,13 @@ def get_bastion_vars(host_vars):
 
 
 def run_ssh_command(args):
-    """Run an SSH command as a subprocess with Bastion error interception.
+    """Run an SSH command as a subprocess with Bastion error diagnostics.
 
     Instead of replacing the process via os.execv(), this spawns ssh as a child
-    process so that stderr can be captured and inspected.  When a non-zero exit
-    code is detected, stderr is checked against known Bastion error patterns and
-    a user-friendly diagnostic is prepended before the original error output.
+    process.  stderr flows directly to the parent (and thus to Ansible) so that
+    SSH error messages are never buffered or lost.  After the child exits, a
+    brief diagnostic is appended when the exit code indicates an SSH
+    transport-level failure (exit code 255).
 
     The function never returns — it always calls sys.exit() with the child
     process return code.
@@ -309,27 +279,20 @@ def run_ssh_command(args):
         sanitized_args,
         stdin=sys.stdin,
         stdout=sys.stdout,
-        stderr=subprocess.PIPE,
+        stderr=sys.stderr,  # let SSH errors flow directly to Ansible
     )
 
-    stderr_output = (
-        result.stderr.decode("utf-8", errors="replace") if result.stderr else ""
-    )
-
-    if result.returncode != 0 and stderr_output:
-        # Exit code 255 signals an SSH transport-level failure (as opposed to a
-        # remote command failure), which strongly indicates the error originates
-        # from the Bastion connection itself rather than the target host.
-        if result.returncode == 255:
-            for pattern, message in BASTION_ERROR_PATTERNS.items():
-                if pattern in stderr_output:
-                    sys.stderr.write(message)
-                    break
-
-    # Always pass through original stderr (warnings, banners, etc.)
-    if stderr_output:
-        sys.stderr.write(stderr_output)
-        if not stderr_output.endswith("\n"):
-            sys.stderr.write("\n")
+    # Exit code 255 signals an SSH transport-level failure (connection
+    # refused, permission denied, hostname unresolvable, etc.) as opposed
+    # to a remote-command failure.  Append a short diagnostic pointing
+    # the user toward the Bastion as the likely failure point.
+    if result.returncode == 255:
+        sys.stderr.write(
+            "\n[BASTION ERROR] SSH connection failed (exit code 255).\n"
+            "This typically indicates a problem connecting to the Bastion "
+            "host itself (authentication, network, or hostname issue).\n"
+            "Review the SSH error message above for details.\n"
+        )
+        sys.stderr.flush()
 
     sys.exit(result.returncode)
