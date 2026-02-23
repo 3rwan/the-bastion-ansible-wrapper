@@ -4,7 +4,7 @@ import getpass
 import os
 import sys
 
-from lib import get_hostvars, manage_conf_file, run_ssh_command
+from lib import find_executable, get_hostvars, manage_conf_file
 
 
 def main():
@@ -72,6 +72,7 @@ def main():
         )
         bastion_host = hostvar.get("bastion_host", os.environ.get("BASTION_HOST"))
 
+    # syscall exec
     args = (
         [
             "ssh",
@@ -98,7 +99,10 @@ def main():
         ]
     )
 
-    run_ssh_command(args)
+    os.execv(
+        find_executable("ssh"),  # absolute path mandatory
+        [str(e).strip() for e in args],  # execv() arg 2 must contain only strings
+    )
 
 
 if __name__ == "__main__":

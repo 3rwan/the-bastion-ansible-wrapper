@@ -7,10 +7,10 @@ import sys
 from lib import (
     awx_get_inventory_file,
     awx_get_vars,
+    find_executable,
     get_hostvars,
     get_var_within,
     manage_conf_file,
-    run_ssh_command,
 )
 
 
@@ -119,7 +119,10 @@ def main():
             cmd,
         ]
     )
-    run_ssh_command(args)
+    os.execv(
+        find_executable("ssh"),  # full path mandatory
+        [str(e).strip() for e in args],  # execv() arg 2 must contain only strings
+    )
 
 
 if __name__ == "__main__":

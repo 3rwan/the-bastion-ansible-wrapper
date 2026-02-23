@@ -2,7 +2,6 @@ import json
 import logging
 import os
 import subprocess
-import sys
 import time
 
 from yaml import YAMLError, safe_load
@@ -251,48 +250,3 @@ def get_bastion_vars(host_vars):
         "bastion_port": bastion_port,
         "bastion_user": bastion_user,
     }
-
-
-def run_ssh_command(args):
-    """Run an SSH command as a subprocess with Bastion error diagnostics.
-
-    Instead of replacing the process via os.execv(), this spawns ssh as a child
-    process.  stderr flows directly to the parent (and thus to Ansible) so that
-    SSH error messages are never buffered or lost.  After the child exits, a
-    brief diagnostic is appended when the exit code indicates an SSH
-    transport-level failure (exit code 255).
-
-    The function never returns — it always calls sys.exit() with the child
-    process return code.
-    """
-    ssh_path = find_executable("ssh")
-    if not ssh_path:
-        sys.stderr.write(
-            "[BASTION ERROR] Could not find the 'ssh' executable in PATH.\n"
-        )
-        sys.exit(1)
-
-    sanitized_args = [str(e).strip() for e in args]
-    sanitized_args[0] = ssh_path
-
-    result = subprocess.run(
-        sanitized_args,
-        stdin=sys.stdin,
-        stdout=sys.stdout,
-        stderr=sys.stderr,  # let SSH errors flow directly to Ansible
-    )
-
-    # Exit code 255 signals an SSH transport-level failure (connection
-    # refused, permission denied, hostname unresolvable, etc.) as opposed
-    # to a remote-command failure.  Append a short diagnostic pointing
-    # the user toward the Bastion as the likely failure point.
-    if result.returncode == 255:
-        sys.stderr.write(
-            "\n[BASTION ERROR] SSH connection failed (exit code 255).\n"
-            "This typically indicates a problem connecting to the Bastion "
-            "host itself (authentication, network, or hostname issue).\n"
-            "Review the SSH error message above for details.\n"
-        )
-        sys.stderr.flush()
-
-    sys.exit(result.returncode)

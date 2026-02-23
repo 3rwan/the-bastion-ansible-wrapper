@@ -4,7 +4,7 @@ import getpass
 import os
 import sys
 
-from lib import get_hostvars, manage_conf_file, run_ssh_command
+from lib import find_executable, get_hostvars, manage_conf_file
 
 
 def main():
@@ -68,7 +68,10 @@ def main():
         "sftp",
     ]
 
-    run_ssh_command(args)
+    os.execv(
+        find_executable("ssh"),
+        [str(e).strip() for e in args],
+    )
 
 
 if __name__ == "__main__":
