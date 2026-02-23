@@ -25,28 +25,14 @@ When `subprocess.run` returns a non-zero exit code, evaluate `stderr`. If it con
 
 ## Step-by-Step Directions (To do)
 
-- [ ] **Step 1:** In `sshwrapper.py`, replace `os.execv(...)` with `subprocess.run(...)`.
-  - Import `subprocess` and `sys`.
-  - Example logic:
-  ```python
-  import subprocess
-  import sys
-  
-  # ... Construct your arguments ...
-  
-  result = subprocess.run(
-      args,
-      stdout=sys.stdout,         # Pass stdout directly to Ansible
-      stderr=subprocess.PIPE,    # Capture stderr for analysis
-      text=True
-  )
-  ```
-- [ ] **Step 2:** Add error handling after the `subprocess.run()` call.
-  - Check `result.returncode`. If it's not `0`, the command failed.
-  - Check if `"Permission denied"` is present in `result.stderr`.
-  - If handled, write a custom message to `sys.stderr` explaining exactly what went wrong with the Bastion connection.
-  - Always write the original `result.stderr` out to `sys.stderr` so Ansible still has it, and exit with `sys.exit(result.returncode)`.
-- [ ] **Step 3:** Drop the hardcoded `"-q"` argument from the initial argument list in `sshwrapper.py` to ensure SSH errors are fully emitted to `stderr`.
-- [ ] **Step 4:** Replicate the exact same `subprocess` intercept logic in `scpwrapper.py`.
-- [ ] **Step 5:** Replicate the exact same `subprocess` intercept logic in `sftpwrapper.py`.
+- [x] **Step 1:** In `sshwrapper.py`, replace `os.execv(...)` with `subprocess.run(...)`.
+  - Implemented via shared `run_ssh_command()` in `lib.py` using `subprocess.run()` with binary stdin/stdout pass-through and captured stderr.
+- [x] **Step 2:** Add error handling after the `subprocess.run()` call.
+  - `run_ssh_command()` checks `result.returncode == 255` (SSH transport failure) and matches stderr against `BASTION_ERROR_PATTERNS` to emit contextual diagnostics.
+  - Original stderr is always forwarded, and exit code is preserved via `sys.exit(result.returncode)`.
+- [x] **Step 3:** Drop the hardcoded `"-q"` argument from the initial argument list in `sshwrapper.py` to ensure SSH errors are fully emitted to `stderr`.
+- [x] **Step 4:** Replicate the exact same `subprocess` intercept logic in `scpwrapper.py`.
+  - Uses the shared `run_ssh_command()` from `lib.py`.
+- [x] **Step 5:** Replicate the exact same `subprocess` intercept logic in `sftpwrapper.py`.
+  - Uses the shared `run_ssh_command()` from `lib.py`.
 - [ ] **Step 6:** Trigger a connection with a bad SSH key to verify Ansible prints the custom error.

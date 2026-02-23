@@ -2,9 +2,41 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import time
 
 from yaml import YAMLError, safe_load
+
+# Known SSH/Bastion error patterns and their user-friendly diagnostics.
+# Each entry maps a substring found in stderr to a contextual error message.
+BASTION_ERROR_PATTERNS = {
+    "Permission denied": (
+        "[BASTION ERROR] SSH connection to the Bastion was denied.\n"
+        "Verify that your SSH key is authorized on the Bastion, "
+        "and that bastion_user and bastion_host are correct.\n"
+    ),
+    "Connection refused": (
+        "[BASTION ERROR] Connection to the Bastion was refused.\n"
+        "Verify that the Bastion host and port are correct "
+        "and that the Bastion is accepting connections.\n"
+    ),
+    "Could not resolve hostname": (
+        "[BASTION ERROR] Could not resolve the Bastion hostname.\n"
+        "Verify that bastion_host is set to a valid, resolvable hostname.\n"
+    ),
+    "Connection timed out": (
+        "[BASTION ERROR] Connection to the Bastion timed out.\n"
+        "Verify network connectivity to the Bastion host and port.\n"
+    ),
+    "Operation timed out": (
+        "[BASTION ERROR] Connection to the Bastion timed out.\n"
+        "Verify network connectivity to the Bastion host and port.\n"
+    ),
+    "No route to host": (
+        "[BASTION ERROR] No route to the Bastion host.\n"
+        "Verify network connectivity and that bastion_host is correct.\n"
+    ),
+}
 
 
 def find_executable(executable, path=None):
@@ -250,3 +282,54 @@ def get_bastion_vars(host_vars):
         "bastion_port": bastion_port,
         "bastion_user": bastion_user,
     }
+
+
+def run_ssh_command(args):
+    """Run an SSH command as a subprocess with Bastion error interception.
+
+    Instead of replacing the process via os.execv(), this spawns ssh as a child
+    process so that stderr can be captured and inspected.  When a non-zero exit
+    code is detected, stderr is checked against known Bastion error patterns and
+    a user-friendly diagnostic is prepended before the original error output.
+
+    The function never returns — it always calls sys.exit() with the child
+    process return code.
+    """
+    ssh_path = find_executable("ssh")
+    if not ssh_path:
+        sys.stderr.write(
+            "[BASTION ERROR] Could not find the 'ssh' executable in PATH.\n"
+        )
+        sys.exit(1)
+
+    sanitized_args = [str(e).strip() for e in args]
+    sanitized_args[0] = ssh_path
+
+    result = subprocess.run(
+        sanitized_args,
+        stdin=sys.stdin,
+        stdout=sys.stdout,
+        stderr=subprocess.PIPE,
+    )
+
+    stderr_output = (
+        result.stderr.decode("utf-8", errors="replace") if result.stderr else ""
+    )
+
+    if result.returncode != 0 and stderr_output:
+        # Exit code 255 signals an SSH transport-level failure (as opposed to a
+        # remote command failure), which strongly indicates the error originates
+        # from the Bastion connection itself rather than the target host.
+        if result.returncode == 255:
+            for pattern, message in BASTION_ERROR_PATTERNS.items():
+                if pattern in stderr_output:
+                    sys.stderr.write(message)
+                    break
+
+    # Always pass through original stderr (warnings, banners, etc.)
+    if stderr_output:
+        sys.stderr.write(stderr_output)
+        if not stderr_output.endswith("\n"):
+            sys.stderr.write("\n")
+
+    sys.exit(result.returncode)

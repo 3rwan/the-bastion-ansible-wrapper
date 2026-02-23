@@ -7,10 +7,10 @@ import sys
 from lib import (
     awx_get_inventory_file,
     awx_get_vars,
-    find_executable,
     get_hostvars,
     get_var_within,
     manage_conf_file,
+    run_ssh_command,
 )
 
 
@@ -92,13 +92,11 @@ def main():
             remote_port = e.split("=")[-1]
             argv[i] = "Port={}".format(bastion_port)
 
-    # syscall exec
     args = (
         [
             "ssh",
             "-p",
             bastion_port,
-            "-q",
             "-o",
             "StrictHostKeyChecking=no",
             "-l",
@@ -121,10 +119,7 @@ def main():
             cmd,
         ]
     )
-    os.execv(
-        find_executable("ssh"),  # full path mandatory
-        [str(e).strip() for e in args],  # execv() arg 2 must contain only strings
-    )
+    run_ssh_command(args)
 
 
 if __name__ == "__main__":
